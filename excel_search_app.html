@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="en">
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#667eea">
+<script>
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("service-worker.js");
+}
+</script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Product Search App</title>
+    <!-- XLSX library embedded for offline use -->
+    <script>
+        // Simplified XLSX parser for offline use
+        window.XLSX = {
+            read: function(data, options) {
+                // For CSV files
+                if (options && options.type === 'string') {
+                    return this.parseCSV(data);
+                }
+                
+                // For Excel files - basic implementation
+                try {
+                    const uint8Array = new Uint8Array(data);
+                    const text = new TextDecoder().decode(uint8Array);
+                    
+                    // Try to parse as CSV first
+                    if (text.includes(',') || text.includes('\t')) {
+                        return this.parseCSV(text);
+                    }
+                    
+                    // If not CSV, show error
+                    throw new Error('Please use CSV format for full offline support');
+                } catch (e) {
+                    throw new Error('File format not supported. Please convert to CSV format.');
+                }
+            },
+            
+            parseCSV: function(csvText) {
+                const lines = csvText.split('\n').filter(line => line.trim());
+                const data = lines.map(line => {
+                    const cells = [];
+                    let current = '';
+                    let inQuotes = false;
+                    
+                    for (let i = 0; i < line.length; i++) {
+                        const char = line[i];
+                        
+                        if (char === '"') {
+                            inQuotes = !inQuotes;
+                        } else if (char === ',' && !inQuotes) {
+                            cells.push(current.trim());
+                            current = '';
+                        } else {
+                            current += char;
+                        }
+                    }
+                    cells.push(current.trim());
+                    return cells;
+                });
+                
+                return {
+                    SheetNames: ['Sheet1'],
+                    Sheets: {
+                        'Sheet1': {
+                            data: data
+                        }
+                    }
+                };
+            },
+            
+            utils: {
+                sheet_to_json: function(sheet, options) {
+                    return sheet.data || [];
+                }
+            }
+        };
+    </script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 20px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #2c3e50, #3498db);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            opacity: 0.9;
+            font-size: 1.1em;
+        }
+
+        .content {
+            padding: 30px;
+        }
+
+        .upload-section {
+            margin-bottom: 30px;
+            padding: 20px;
+            border: 2px dashed #3498db;
+            border-radius: 15px;
+            text-align: center;
+            background: linear-gradient(135deg, #f8f9fa, #e9ecef);
+            transition: all 0.3s ease;
+        }
+
+        .upload-section:hover {
+            border-color: #2980b9;
+            background: linear-gradient(135deg, #e9ecef, #dee2e6);
+        }
+
+        .file-input {
+            display: none;
+        }
+
+        .upload-btn {
+            background: linear-gradient(135deg, #3498db, #2980b9);
+            color: white;
+            padding: 15px 30px;
+            border: none;
+            border-radius: 50px;
+            cursor: pointer;
+            font-size: 1.1em;
+            font-weight: bold;
+            transition: all 0.3s ease;
+            box-shadow: 0 5px 15px rgba(52, 152, 219, 0.3);
+        }
+
+        .upload-btn:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 10px 25px rgba(52, 152, 219, 0.4);
+        }
+
+        .file-info {
+            margin-top: 15px;
+            font-weight: bold;
+            color: #27ae60;
+        }
+
+        .search-section {
+            margin-bottom: 30px;
+        }
+
+        .search-controls {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+
+        .search-input {
+            flex: 1;
+            padding: 15px;
+            border: 2px solid #ddd;
+            border-radius: 10px;
+            font-size: 1em;
+            transition: border-color 0.3s ease;
+            min-width: 250px;
+        }
+
+        .search-input:focus {
+            outline: none;
+            border-color: #3498db;
+            box-shadow: 0 0 10px rgba(52, 152, 219, 0.2);
+        }
+
+        .search-type {
+            padding: 15px;
+            border: 2px solid #ddd;
+            border-radius: 10px;
+            font-size: 1em;
+            background: white;
+            min-width: 150px;
+        }
+
+        .search-btn {
+            background: linear-gradient(135deg, #27ae60, #2ecc71);
+            color: white;
+            padding: 15px 25px;
+            border: none;
+            border-radius: 10px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: all 0.3s ease;
+        }
+
+        .search-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(39, 174, 96, 0.3);
+        }
+
+        .similar-btn {
+            background: linear-gradient(135deg, #e74c3c, #c0392b);
+            color: white;
+            padding: 15px 25px;
+            border: none;
+            border-radius: 10px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: all 0.3s ease;
+            margin-left: 10px;
+        }
+
+        .similar-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(231, 76, 60, 0.3);
+        }
+
+        .results-section {
+            margin-top: 30px;
+        }
+
+        .results-header {
+            background: linear-gradient(135deg, #34495e, #2c3e50);
+            color: white;
+            padding: 15px;
+            border-radius: 10px 10px 0 0;
+            font-weight: bold;
+        }
+
+        .results-container {
+            max-height: 400px;
+            overflow-y: auto;
+            border: 2px solid #34495e;
+            border-top: none;
+            border-radius: 0 0 10px 10px;
+        }
+
+        .result-item {
+            padding: 20px;
+            border-bottom: 1px solid #eee;
+            transition: background-color 0.3s ease;
+        }
+
+        .result-item:hover {
+            background-color: #f8f9fa;
+        }
+
+        .result-item:last-child {
+            border-bottom: none;
+        }
+
+        .result-field {
+            margin-bottom: 10px;
+        }
+
+        .field-label {
+            font-weight: bold;
+            color: #2c3e50;
+            margin-right: 10px;
+        }
+
+        .field-value {
+            color: #34495e;
+        }
+
+        .no-results {
+            text-align: center;
+            padding: 40px;
+            color: #7f8c8d;
+            font-style: italic;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 20px;
+            color: #3498db;
+        }
+
+        @media (max-width: 768px) {
+            .search-controls {
+                flex-direction: column;
+            }
+            
+            .search-input {
+                min-width: auto;
+            }
+            
+            .similar-btn {
+                margin-left: 0;
+                margin-top: 10px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🔍 Product Search</h1>
+            <p>Upload CSV files and search through products efficiently</p>
+        </div>
+        
+        <div class="content">
+            <div class="upload-section">
+                <input type="file" id="fileInput" class="file-input" accept=".csv,.txt">
+                <button class="upload-btn" onclick="document.getElementById('fileInput').click()">
+                    📁 Upload CSV File
+                </button>
+                <div id="fileInfo" class="file-info"></div>
+            </div>
+
+            <div class="search-section">
+                <div class="search-controls">
+                    <input type="text" id="searchInput" class="search-input" placeholder="Enter search term...">
+                    <select id="searchType" class="search-type">
+                        <option value="Name">Name</option>
+                        <option value="COMPOSITIONS">Compositions</option>
+                        <option value="PRODUCT">Product</option>
+                        <option value="USES">Uses</option>
+                    </select>
+                    <button class="search-btn" onclick="performSearch()">Search</button>
+                    <button class="similar-btn" onclick="findSimilarProducts()">Find Similar</button>
+                </div>
+            </div>
+
+            <div id="resultsSection" class="results-section" style="display: none;">
+                <div class="results-header">
+                    <span id="resultsCount">Search Results</span>
+                </div>
+                <div class="results-container" id="resultsContainer">
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let excelData = [];
+        let headers = [];
+
+        document.getElementById('fileInput').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const fileInfo = document.getElementById('fileInfo');
+            fileInfo.innerHTML = `📄 ${file.name} (${(file.size / 1024).toFixed(2)} KB)`;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const csvContent = e.target.result;
+                    const workbook = XLSX.read(csvContent, {type: 'string'});
+                    const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+                    const jsonData = XLSX.utils.sheet_to_json(firstSheet, {header: 1});
+                    
+                    headers = jsonData[0];
+                    excelData = jsonData.slice(1);
+                    
+                    fileInfo.innerHTML += ` ✅ Loaded successfully! (${excelData.length} rows)`;
+                    
+                    // Update search type options based on available columns
+                    updateSearchOptions();
+                } catch (error) {
+                    fileInfo.innerHTML = `❌ Error loading file: ${error.message}`;
+                }
+            };
+            reader.readAsText(file);
+        });
+
+        function updateSearchOptions() {
+            const searchType = document.getElementById('searchType');
+            searchType.innerHTML = '';
+            
+            headers.forEach(header => {
+                const option = document.createElement('option');
+                option.value = header;
+                option.textContent = header;
+                searchType.appendChild(option);
+            });
+        }
+
+        function performSearch() {
+            if (excelData.length === 0) {
+                alert('Please upload a CSV file first!');
+                return;
+            }
+
+            const query = document.getElementById('searchInput').value.trim();
+            if (!query) {
+                alert('Please enter a search term!');
+                return;
+            }
+
+            const searchType = document.getElementById('searchType').value;
+            const searchIndex = headers.indexOf(searchType);
+            
+            if (searchIndex === -1) {
+                alert('Invalid search column!');
+                return;
+            }
+
+            const results = [];
+            for (let i = 0; i < excelData.length; i++) {
+                const cellValue = String(excelData[i][searchIndex] || '').toLowerCase();
+                if (cellValue.includes(query.toLowerCase())) {
+                    results.push(excelData[i]);
+                }
+            }
+
+            displayResults(results, `Search Results for "${query}" in ${searchType}`);
+        }
+
+        function findSimilarProducts() {
+            if (excelData.length === 0) {
+                alert('Please upload a CSV file first!');
+                return;
+            }
+
+            const nameQuery = document.getElementById('searchInput').value.trim();
+            if (!nameQuery) {
+                alert('Please enter a product name to find similar products!');
+                return;
+            }
+
+            const nameCol = headers.indexOf('Name');
+            const compCol = headers.indexOf('COMPOSITIONS');
+
+            if (nameCol === -1 || compCol === -1) {
+                alert('Name and COMPOSITIONS columns are required for similarity search!');
+                return;
+            }
+
+            let targetComp = null;
+            for (let i = 0; i < excelData.length; i++) {
+                if (String(excelData[i][nameCol] || '').toLowerCase() === nameQuery.toLowerCase()) {
+                    targetComp = excelData[i][compCol];
+                    break;
+                }
+            }
+
+            if (!targetComp) {
+                alert('Product not found!');
+                return;
+            }
+
+            const similar = [];
+            for (let i = 0; i < excelData.length; i++) {
+                if (excelData[i][compCol] === targetComp) {
+                    similar.push(excelData[i]);
+                }
+            }
+
+            displayResults(similar, `Products with similar composition to "${nameQuery}"`);
+        }
+
+        function displayResults(results, title) {
+            const resultsSection = document.getElementById('resultsSection');
+            const resultsContainer = document.getElementById('resultsContainer');
+            const resultsCount = document.getElementById('resultsCount');
+
+            resultsCount.textContent = `${title} (${results.length} found)`;
+            resultsContainer.innerHTML = '';
+
+            if (results.length === 0) {
+                resultsContainer.innerHTML = '<div class="no-results">No results found</div>';
+            } else {
+                results.forEach(row => {
+                    const resultItem = document.createElement('div');
+                    resultItem.className = 'result-item';
+                    
+                    let html = '';
+                    headers.forEach((header, index) => {
+                        if (row[index]) {
+                            html += `
+                                <div class="result-field">
+                                    <span class="field-label">${header}:</span>
+                                    <span class="field-value">${row[index]}</span>
+                                </div>
+                            `;
+                        }
+                    });
+                    
+                    resultItem.innerHTML = html;
+                    resultsContainer.appendChild(resultItem);
+                });
+            }
+
+            resultsSection.style.display = 'block';
+        }
+
+        // Enter key support for search
+        document.getElementById('searchInput').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                performSearch();
+            }
+        });
+    </script>
+</body>
+</html>
